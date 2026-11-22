@@ -491,10 +491,6 @@ function buildScenery(){
   pop.forEach((p,i)=>{ const s=0.85+rnd()*0.35; S3.set(s,s*(0.9+rnd()*0.3),s); P3.set(p[0],1.6+4.25*S3.y,p[1]); M.compose(P3,Q,S3); popM.setMatrixAt(i,M); col.setHSL(0.25+rnd()*0.05,0.4,0.27+rnd()*0.07); popM.setColorAt(i,col); }); scene.add(popM);
   const rm=new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1.9,0),lam(0xffffff),Math.max(1,round.length)); rm.castShadow=true;
   round.forEach((p,i)=>{ const s=0.8+rnd()*0.45; S3.set(s,s*0.9,s); P3.set(p[0],2.6+1.6*s,p[1]); Q.setFromEuler(new THREE.Euler(rnd(),rnd()*3,0)); M.compose(P3,Q,S3); rm.setMatrixAt(i,M); col.setHSL(0.22+rnd()*0.07,0.45,0.3+rnd()*0.08); rm.setColorAt(i,col); }); Q.identity(); scene.add(rm);
-  // exam booth next to the start (blue roof)
-  const booth=new THREE.Group(); booth.add(mesh(new THREE.BoxGeometry(8,2.8,4.5),lam(0xe9ecef),0,1.4,0)); booth.add(mesh(new THREE.BoxGeometry(8.4,0.3,4.9),lam(0x2f4f9e),0,2.95,0));
-  for(let i=0;i<4;i++) booth.add(mesh(new THREE.BoxGeometry(1.2,1.0,0.05),lam(0x3d6077),-2.7+i*1.8,1.6,2.27,false));
-  booth.position.set(157,0,16.5); booth.rotation.y=-0.35; scene.add(booth); OBB.push({x:157,z:16.5,c:Math.cos(0.35),s:Math.sin(0.35),hx:4.2,hz:2.5,rad:5});
   // the Avtocon building beyond the car park (south-east in real life)
   const cen=new THREE.Group(); const glass=new THREE.MeshPhongMaterial({color:0x3f6f8a,shininess:60});
   cen.add(mesh(new THREE.CylinderGeometry(26,26,12,5),lam(0xd9dde0),0,6,0)); cen.add(mesh(new THREE.CylinderGeometry(26.3,26.3,3,5),glass,0,8,0,false));
@@ -637,7 +633,18 @@ function makeCobalt(color,brand){
     const rs=new THREE.Mesh(new THREE.BoxGeometry(0.30,0.30,0.95),[fm,fm,ym,ym,um,um]); rs.position.set(2.0-OFF,1.68,0); rs.castShadow=true; g.add(rs);
     add(new THREE.BoxGeometry(0.2,0.05,0.6),darkM,2.0,1.515,0);
   }
-  return {g,L:L1,wheels,pivots};
+  const interior=new THREE.Group(); interior.visible=false; g.add(interior);
+  const dashM=lam(0x22262b);
+  // dark trim over the body top inside the cabin (seats, door cards), dashboard and instrument hood
+  const trim=new THREE.Mesh(new THREE.BoxGeometry(2.15,0.03,1.62),lam(0x2c3036)); trim.position.set(-0.08,1.115,0); interior.add(trim);
+  const dash=new THREE.Mesh(new THREE.BoxGeometry(0.56,0.1,1.58),dashM); dash.position.set(0.73,1.12,0); interior.add(dash);
+  const hoodTop=new THREE.Mesh(new THREE.BoxGeometry(0.2,0.06,0.42),lam(0x16191c)); hoodTop.position.set(0.6,1.2,-0.37); interior.add(hoodTop);
+  const swp=new THREE.Group(); swp.position.set(0.30,1.05,-0.37); swp.rotation.z=0.42; interior.add(swp);
+  const sw=new THREE.Group(); swp.add(sw);
+  const ringG=new THREE.TorusGeometry(0.185,0.02,10,32); ringG.rotateY(Math.PI/2); sw.add(new THREE.Mesh(ringG,lam(0x15181b)));
+  for(const a of [Math.PI/2,Math.PI*7/6,-Math.PI/6]){ const sp=new THREE.Mesh(new THREE.BoxGeometry(0.02,0.16,0.03),lam(0x2b3036)); sp.position.set(0,Math.sin(a)*0.08,Math.cos(a)*0.08); sp.rotation.x=-a+Math.PI/2; sw.add(sp); }
+  const hub=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,0.04,14),lam(0x2b3036)); hub.rotation.z=Math.PI/2; sw.add(hub);
+  return {g,L:L1,wheels,pivots,interior,sw};
 }
 function makePed(){
   const g=new THREE.Group(); const legM=lam(0x26292d);
@@ -685,7 +692,7 @@ function readInput(){
   const fwd=!!(keys.ArrowUp||keys.KeyW||touch.gas), back=!!(keys.ArrowDown||keys.KeyS||touch.brake);
   let st=0; if(keys.ArrowLeft||keys.KeyA||touch.left) st-=1; if(keys.ArrowRight||keys.KeyD||touch.right) st+=1;
   const still=Math.abs(car.v)<0.1;
-  if(car.gear==='D'&&back&&!fwd&&revIntent&&still){ car.gear='R'; tone(520,0.06,'square',0.04); }
+  if(car.gear==='D'&&back&&!fwd&&revIntent&&still){ car.gear='R'; tone(520,0.06,'square',0.04); if(!car.hazard) toast('Задний ход: включите аварийку (H)','bad'); }
   else if(car.gear==='R'&&fwd&&!back&&still){ car.gear='D'; revIntent=false; tone(700,0.06,'square',0.04); }
   if(car.gear==='D') return {gas:fwd?1:0,brake:back?1:0,steer:st};
   return {gas:back?1:0,brake:fwd?1:0,steer:st};
@@ -694,8 +701,10 @@ function readInput(){
 /* ===== physics ===== */
 function physics(dt){
   const inp=readInput(); S.brakeOn=inp.brake>0; const v0=car.v;
-  if(inp.steer) car.steer=clamp(car.steer+inp.steer*1.7*dt,-SMAX,SMAX);
-  else { const r=(0.3+Math.abs(v0)*0.35)*dt; car.steer=Math.abs(car.steer)<=r?0:car.steer-Math.sign(car.steer)*r; }
+  { const vs=Math.abs(v0), lim=SMAX/(1+(vs/7)*(vs/7));
+    if(inp.steer){ const d=inp.steer*lim-car.steer, mx=1.15*dt; car.steer+=clamp(d*Math.min(1,dt/0.16),-mx,mx); }
+    else { const mx=(0.45+vs*0.3)*dt; car.steer+=clamp(-car.steer*Math.min(1,dt/0.3),-mx,mx); if(Math.abs(car.steer)<0.002) car.steer=0; }
+    car.steer=clamp(car.steer,-SMAX,SMAX); }
   const c=Math.cos(car.a), s=Math.sin(car.a);
   const gF=9.81*(heightAt(car.x+c*L,car.z+s*L)-heightAt(car.x,car.z))/L; // >0: uphill when driving forward
   let acc=-gF;
@@ -807,7 +816,7 @@ const EXS=[
    },
    finish(e){ alarm(false); if(!e.sig) penal(100,'Упражнение пропущено'); } },
  { name:'Разворот и парковка в бокс', pos:[146.46,67.84], near:16,
-   hint:'С верхней дороги поверните налево в Т‑образный проезд. Бокс слева под прямым углом, по размеру машины, подсвечен жёлтым. Проедьте его, остановитесь и задним ходом (S) заедьте внутрь, пока задние колёса не коснутся жёлтой линии. Затем выезжайте вперёд и возвращайтесь на дорогу. Белые линии не задевайте, на всё 2 минуты.',
+   hint:'С верхней дороги поверните налево в Т‑образный проезд. Бокс слева под прямым углом, по размеру машины, подсвечен жёлтым. Проедьте его, остановитесь и задним ходом (S) с аварийкой (H) заедьте внутрь, пока задние колёса не коснутся жёлтой линии. Затем выезжайте вперёд и возвращайтесь на дорогу. Белые линии не задевайте, на всё 2 минуты.',
    update(e){ const W=G.W;
      if(!e.t0&&near(this)) e.t0=S.t;
      if(!e.inn&&W.some(w=>{ const l=toL(BX,w); return l.s>0.3&&l.s<BOX.depth&&Math.abs(l.t)<BOX.half+0.3; })) e.inn=true;
@@ -832,7 +841,7 @@ const EXS=[
    },
    finish(e){ if(!e.sig) penal(5,'При повороте направо не включён поворотник'); } },
  { name:'Параллельная парковка задним ходом', pos:[124.7,46.6], near:14,
-   hint:'После перекрёстка поверните направо вдоль островка. Карман врезан в островок справа, бордюр с трёх сторон, подсвечен жёлтым. Проедьте его, остановитесь и задним ходом (S) поставьте машину так, чтобы оба правых колеса стояли на жёлтой линии. Белые линии не задевайте, на всё 2 минуты.',
+   hint:'После перекрёстка поверните направо вдоль островка. Карман врезан в островок справа, бордюр с трёх сторон, подсвечен жёлтым. Проедьте его, остановитесь и задним ходом (S) с аварийкой (H) поставьте машину так, чтобы оба правых колеса стояли на жёлтой линии. Белые линии не задевайте, на всё 2 минуты.',
    update(e){ const W=G.W;
      if(!e.t0&&near(this)) e.t0=S.t;
      if(!e.inn&&W.some(w=>{ const l=toL(PK,w); return Math.abs(l.s)<POCK.half+0.3&&l.t>-POCK.depth+0.4&&l.t<POCK.depth+0.3; })) e.inn=true;
@@ -844,7 +853,7 @@ const EXS=[
    finish(e){ if(!e.inn) penal(100,'Упражнение пропущено'); else if(!e.ok) penal(20,'Правые колёса не установлены на линию фиксации'); } },
  { name:'Финиш', pos:[toW(DIAG,-57,-2).x,toW(DIAG,-57,-2).z],
    hint:'Поверните налево к дороге вдоль забора, затем направо. Включите правый поворотник (E) до финишной линии и пересеките её.',
-   update(){ const f=LS(DIAG,G.fb); if(f.s<=D.finish+0.4&&f.t>-5.5&&f.t<1){ if(!car.sigR) penal(5,'Перед финишем не включён правый поворотник'); return 'done'; } } }
+   update(e){ if(car.sigR) e.sig=true; const f=LS(DIAG,G.fb); if(f.s<=D.finish+0.4&&f.t>-5.5&&f.t<1){ if(!e.sig) penal(5,'Перед финишем не включён правый поворотник'); return 'done'; } } }
 ];
 
 function penal(p,text,exName){
@@ -957,7 +966,7 @@ function updateVisuals(){
   const hFL=heightAt(G.wFL.x,G.wFL.z), hFR=heightAt(G.wFR.x,G.wFR.z), hRL=heightAt(G.wRL.x,G.wRL.z), hRR=heightAt(G.wRR.x,G.wRR.z);
   const g=carObj.g; g.position.set(G.ctr.x,(hFL+hFR+hRL+hRR)/4,G.ctr.z); g.rotation.order='YZX';
   g.rotation.set(Math.atan2((hFL+hRL)/2-(hFR+hRR)/2,TRK*2),-car.a,Math.atan2((hFL+hFR)/2-(hRL+hRR)/2,L));
-  carObj.pivots.forEach(p=>{ p.rotation.y=-car.steer; }); carObj.wheels.forEach(w=>{ w.rotation.z=car.spin; });
+  carObj.pivots.forEach(p=>{ p.rotation.y=-car.steer; }); carObj.wheels.forEach(w=>{ w.rotation.z=car.spin; }); carObj.sw.rotation.x=car.steer*4.2;
   const ph=S.blinkPh, Lm=carObj.L;
   Lm.bl.color.setHex((car.sigL||car.hazard)&&ph?0xffa200:0x6b4a12); Lm.br.color.setHex((car.sigR||car.hazard)&&ph?0xffa200:0x6b4a12);
   Lm.tail.color.setHex(S.brakeOn||car.hb?0xff2a1f:0x7a1210); Lm.rev.color.setHex(car.gear==='R'?0xf4f4f4:0x3a3a3a);
@@ -978,13 +987,21 @@ function updateCamera(dt,snap){
     camera.up.set(0,1,0); camera.position.copy(camPos);
     if(S.shake>0){ camera.position.x+=(Math.random()-0.5)*S.shake*0.4; camera.position.y+=(Math.random()-0.5)*S.shake*0.3; S.shake=Math.max(0,S.shake-dt); }
     camera.lookAt(camLook);
+  } else if(S.cam===2){
+    const g=carObj.g; g.updateMatrixWorld(); FPV_E.set(-0.2,1.25,-0.37); FPV_T.set(12,0.62,-0.37); g.localToWorld(FPV_E); g.localToWorld(FPV_T);
+    camera.up.set(0,1,0); camera.position.copy(FPV_E);
+    if(S.shake>0){ camera.position.x+=(Math.random()-0.5)*S.shake*0.15; camera.position.y+=(Math.random()-0.5)*S.shake*0.1; S.shake=Math.max(0,S.shake-dt); }
+    camera.lookAt(FPV_T);
   } else { camera.up.set(0,0,-1); camera.position.set(G.ctr.x,y+(camera.aspect<0.85?40:30),G.ctr.z+0.01); camera.lookAt(G.ctr.x,y,G.ctr.z); }
 }
+const FPV_E=new THREE.Vector3(), FPV_T=new THREE.Vector3();
+function camFov(){ const f=S.cam===2?(camera.aspect<0.85?80:62):56; if(camera.fov!==f){ camera.fov=f; camera.updateProjectionMatrix(); } if(carObj) carObj.interior.visible=S.cam===2; }
 function updateSignals(dt){
   S.blinkT+=dt; const ph=(S.blinkT%0.8)<0.42; const any=car.sigL||car.sigR||car.hazard;
   if(any&&ph!==S.blinkPh) tone(ph?1550:1150,0.025,'square',0.025); S.blinkPh=ph;
-  if(car.sigL){ if(car.steer<-0.22) car.armL=true; else if(car.armL&&car.steer>-0.03){ car.sigL=false; car.armL=false; } }
-  if(car.sigR){ if(car.steer>0.22) car.armR=true; else if(car.armR&&car.steer<0.03){ car.sigR=false; car.armR=false; } }
+  const turned=(h0)=>Math.atan2(Math.sin(car.a-h0),Math.cos(car.a-h0));
+  if(car.sigL){ if(car.h0L===undefined) car.h0L=car.a; if(-turned(car.h0L)>0.7) car.armL=true; if(car.armL&&car.steer>-0.06){ car.sigL=false; car.armL=false; } }
+  if(car.sigR){ if(car.h0R===undefined) car.h0R=car.a; if(turned(car.h0R)>0.7) car.armR=true; if(car.armR&&car.steer<0.06){ car.sigR=false; car.armR=false; } }
   if(S.alarm){ S.alarmT-=dt; if(S.alarmT<=0){ S.alarmT=0.32; S.alarmHi=!S.alarmHi; tone(S.alarmHi?880:660,0.22,'square',0.05); } }
 }
 
@@ -1016,8 +1033,8 @@ function showEnd(pass,reached){
 function toMenu(){ S.running=false; S.over=false; S.paused=false; alarm(false); ped.active=false; resetCar(); computeG(); $('hud').hidden=true; ['endScreen','pauseScreen'].forEach(id=>$(id).hidden=true); $('startScreen').hidden=false; }
 function togglePause(){ if(!S.running||S.over) return; S.paused=!S.paused; $('pauseScreen').hidden=!S.paused; if(S.paused) $('btnResume').focus(); }
 function toggleGear(){ if(Math.abs(car.v)>0.4){ toast('Сначала остановитесь, потом переключайте передачу','info'); return; } car.gear=car.gear==='D'?'R':'D'; tone(car.gear==='R'?520:700,0.06,'square',0.04); }
-function toggleSig(side){ if(side==='L'){ car.sigL=!car.sigL; car.armL=false; if(car.sigL) car.sigR=false; } else { car.sigR=!car.sigR; car.armR=false; if(car.sigR) car.sigL=false; } }
-function cycleCam(){ S.cam=(S.cam+1)%2; setText('pCam',S.cam===0?'Вид: за машиной':'Вид: сверху'); if(S.cam===0) updateCamera(0,true); }
+function toggleSig(side){ if(side==='L'){ car.sigL=!car.sigL; car.armL=false; car.h0L=car.a; if(car.sigL) car.sigR=false; } else { car.sigR=!car.sigR; car.armR=false; car.h0R=car.a; if(car.sigR) car.sigL=false; } }
+function cycleCam(){ const order=[0,2,1]; S.cam=order[(order.indexOf(S.cam)+1)%3]; setText('pCam',['Вид: за машиной','Вид: сверху','Вид: из салона'][S.cam]); camFov(); if(S.cam===0) updateCamera(0,true); }
 function action(k){
   if(!S.running||S.over||S.paused) return;
   if(k==='gear') toggleGear(); else if(k==='hb'){ car.hb=!car.hb; tone(car.hb?300:420,0.07,'square',0.04); }
@@ -1049,7 +1066,7 @@ $('btnExam').addEventListener('click',()=>startExam('exam')); $('btnTrain').addE
 $('btnAgain').addEventListener('click',()=>startExam(S.mode)); $('btnOther').addEventListener('click',()=>startExam(S.mode==='exam'?'train':'exam'));
 $('btnMenu').addEventListener('click',toMenu); $('btnMenu2').addEventListener('click',toMenu); $('btnResume').addEventListener('click',togglePause);
 $('btnRestart').addEventListener('click',()=>startExam(S.mode)); $('btnSound').addEventListener('click',toggleMute);
-const KEYS=[['W ↑','Газ'],['S ↓','Тормоз, с места назад'],['A D ← →','Руль'],['R','Передача D / R вручную'],['Пробел','Ручник'],['Q / E','Поворотники'],['H','Аварийка'],['B','Ремень'],['C','Камера: сзади / сверху'],['V','Зеркала: вкл / выкл'],['Esc','Пауза']];
+const KEYS=[['W ↑','Газ'],['S ↓','Тормоз, с места назад'],['A D ← →','Руль'],['R','Передача D / R вручную'],['Пробел','Ручник'],['Q / E','Поворотники'],['H','Аварийка'],['B','Ремень'],['C','Камера: сзади / из салона / сверху'],['V','Зеркала: вкл / выкл'],['Esc','Пауза']];
 for(const id of ['keys1','keys2']) $(id).innerHTML=KEYS.map(k=>'<div><kbd>'+k[0]+'</kbd>'+k[1]+'</div>').join('')+(isTouch?'<div><kbd>Экран</kbd>Кнопки внизу экрана</div>':'');
 $('exList').innerHTML=EXS.map(e=>'<li>'+e.name+'</li>').join('');
 
@@ -1093,12 +1110,13 @@ function renderMirrors(dt){
 }
 
 /* ===== loop ===== */
-function resize(){ const w=innerWidth, h=innerHeight; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); if(S.running) buildMini(); syncTop(); MIR.lay=0; }
+function resize(){ const w=innerWidth, h=innerHeight; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); camFov(); if(S.running) buildMini(); syncTop(); MIR.lay=0; }
 addEventListener('resize',resize);
 function simStep(dt){
   for(let i=0;i<4;i++) physics(dt/4);
   computeG();
-  if(!S.over){ S.t+=dt; updateLight(dt); updatePed(dt); examTick(dt); }
+  if(!S.over){ S.t+=dt; updateLight(dt); updatePed(dt); examTick(dt);
+    if(car.v<-0.15&&!car.hazard){ S.revNoHz=(S.revNoHz||0)-car.v*dt; if(S.revNoHz>0.6&&!S.st.revPen){ S.st.revPen=true; penal(5,'Движение задним ходом без аварийной сигнализации'); } } else if(car.v>=0) S.revNoHz=0; }
   S.prev=cp(G.ctr); updateSignals(dt);
 }
 let last=performance.now();
